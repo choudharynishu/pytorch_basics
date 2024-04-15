@@ -96,11 +96,11 @@ check_path(checkpoint_path)
 # -------------------------------------------------------Data Import-------------------------------------------------- #
 base_url = 'https://raw.githubusercontent.com/phlippe/saved_models/main/tutorial3/'
 files_to_download = ["FashionMNIST_elu.config", "FashionMNIST_elu.tar",
-                    "FashionMNIST_leakyrelu.config", "FashionMNIST_leakyrelu.tar",
-                    "FashionMNIST_relu.config", "FashionMNIST_relu.tar",
-                    "FashionMNIST_sigmoid.config", "FashionMNIST_sigmoid.tar",
-                    "FashionMNIST_swish.config", "FashionMNIST_swish.tar",
-                    "FashionMNIST_tanh.config", "FashionMNIST_tanh.tar"]
+                     "FashionMNIST_leakyrelu.config", "FashionMNIST_leakyrelu.tar",
+                     "FashionMNIST_relu.config", "FashionMNIST_relu.tar",
+                     "FashionMNIST_sigmoid.config", "FashionMNIST_sigmoid.tar",
+                     "FashionMNIST_swish.config", "FashionMNIST_swish.tar",
+                     "FashionMNIST_tanh.config", "FashionMNIST_tanh.tar"]
 
 for file in tqdm(files_to_download):
     # File location if it already exists
@@ -114,7 +114,89 @@ for file in tqdm(files_to_download):
         except HTTPError as e:
             print("Something wrong with URL retrieval, please try to download directly from Google Drive folder")
 
+# -------------------------------------------------Activation Functions----------------------------------------------- #
+'''
+PyTorch documentation on (nonlinear) Activation or Squashing functions:
+https://pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity
+These functions are available both as modules as well as functions
+As Modules
+-torch
+    |--torch.nn
+        |-torch.nn.Sigmoid
+        |-torch.nn.Tanh
+        
+As Functions
+-torch
+    |-torch.sigmoid
+    |-torch.tanh
+'''
 
 
+# Defining using the torch.nn module
+class activation_functions(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.name = self.__class__.__name__
+        self.config = {"name": self.name}
 
 
+# Defining as functions
+class Sigmoid(activation_functions):
+    # Instantiation function will be automatically inherited from the activation_function class
+    def forward(self, x):
+        return 1 / (1 + torch.exp(-x))
+
+
+class Tanh(activation_functions):
+    # Instantiation function will be automatically inherited from the activation_function class
+    def forward(self, x):
+        return ((torch.exp(x) - torch.exp(-x)) / (torch.exp(x) + torch.exp(-x)))
+
+
+class ReLU(activation_functions):
+    # Instantiation function will be automatically inherited from the activation_function class
+    # Derivative of ReLU is computed using the subgradient method
+    def forward(self, x):
+        return x * (x > 0).float()
+
+
+class LeakyReLU(activation_functions):
+    # Needs an instantiation function because of special parameter 'alpha'
+    # Default value of alpha is 0.1
+    def __init__(self, alpha=0.1):
+        super().__init__()
+        self.config["alpha"] = alpha
+
+    def forward(self, x):
+        return torch.where(x > 0, x, self.config["alpha"] * x)
+
+
+class ELU(activation_functions):
+    # Needs an instantiation function because of special parameter 'alpha'
+    # Default value of alpha is 1.0
+    def __init__(self, alpha=1.0):
+        super().__init__()
+        self.config["exp_alpha"] = alpha
+
+    def forward(self, x):
+        return torch.where(x > 0, x, self.config["exp_alpha"] * (torch.exp(x) - 1))
+
+
+class Swish(activation_functions):
+
+    def forward(self, x):
+        return x / (1 + torch.exp(-x))
+
+
+act_fn_by_name = {
+    "sigmoid": Sigmoid,
+    "tanh": Tanh,
+    "relu": ReLU,
+    "leakyrelu": LeakyReLU,
+    "elu": ELU,
+    "swish": Swish
+}
+
+# --------------------------------------------Visualizing Activation Functions---------------------------------------- #
+
+# --------------------------------------------Experiment on FashionMNIST Dataset-------------------------------------- #
