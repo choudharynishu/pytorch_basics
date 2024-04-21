@@ -96,7 +96,7 @@ checkpoint_path = "./activation_fns"
 check_path(dataset_path)
 check_path(checkpoint_path)
 
-# -------------------------------------------------------Data Import-------------------------------------------------- #
+# ------------------------------------Downloading Pre-trained models-------------------------------------------------- #
 base_url = 'https://raw.githubusercontent.com/phlippe/saved_models/main/tutorial3/'
 files_to_download = ["FashionMNIST_elu.config", "FashionMNIST_elu.tar",
                      "FashionMNIST_leakyrelu.config", "FashionMNIST_leakyrelu.tar",
@@ -351,19 +351,72 @@ def save_model(network, model_path, model_name):
     return None
 
 
-#  ---------Load the dataset----------------------  #
+#  ---------Load the Dataset FashionMNIST----------------------  #
+"""
+Downloads the famous Fashion MNIST dataset. The dataset has 10 output classes with each data point containing a tuple of
+(PILimage, class_label). 
+The image is of dimension 28 * 28 and should be converted to a tensor. The conversion of PIL image into a tensor 
+can be done using an object created using transforms.ToTensor().
+ 
+From documentation, 
+transforms.ToTensor(): converts a PIL Image or ndarray (H*W*C) in the range of [0, 255] to a torch.FloatTensor 
+(C * H * W) in range of [0.0, 1.0].
 
-# ---- Data transformation applied to each image
-# ---- Load the training set - split it into training and validation set
-# ---- Load the test set
-# ---- Create the DataLoader
-# ---- Visualize the dataset
+Then this range can be transformed to [-1, 1] using transforms.Normalize(mean =0.5, std =0.5)
+transforms.Compose(*)
+"""
+# Compose the transformation pipeline
+transform_pipeline = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+
+# Download the training and testing dataset
+train_dataset = FashionMNIST(root=dataset_path, train=True, transform=transform_pipeline, download=True)
+test_dataset = FashionMNIST(root=dataset_path, train=False, transform=transform_pipeline, download=True)
+
+train_size = len(train_dataset)
+train_length, val_length = 0.8 * train_size, 0.2 * train_size
+
+"""
+Each observation in the training set consists of a tuple (image, label). The images are black and white, consists of
+a single channel
+"""
+# Divide the training set into train and validation set
+train_set, validation_set = data.random_split(train_dataset, [train_length, val_length])
+
+# Create Dataloader, to iterate through the data batches
+train_loader = data.DataLoader(train_set, batch_size=1024,
+                               shuffle=True)  # This loader is bigger in size compared to small loader in visualize function
+validation_loader = data.DataLoader(validation_set, batch_size=1024, shuffle=True)
+test_loader = data.DataLoader(test_dataset, batch_size=1024, shuffle=True)
+
 
 #  ---------Visualize the gradient----------------------  #
+def visualize_gradient(network):
+    """
+    :param network: Object of class BaseNetwork
+    :return: Plotly line plot of estimated gradients through different layers
+    """
+
+    network.eval()  # turn off dropout or batch normalization
+    # create a small dataloader - batchsize =128
+    train_small_loader = data.DataLoader(train_set, batch_size=128, shuffle=True)
+    # extract input image and related labels from the next batch
+    image, label = next(iter(train_small_loader))
+    print(f"Length of smaller dataset: {len(image)}")
+    # For visualization purposes only single training step will be performed with every function call
+    # Zero out the gradients - such that estimated gradients in this step don't accumulate from previous step
+    network.zero_grad()
+    # Compute predicted labels - forward pass to compute loss
+    predicted_label = network(image)
+    # Compute loss value -
+    loss = F.cross_entropy(predicted_label, label)
+    # Backpropagation
+    loss.backward()
+    # Access the estimated gradient - only restricted to weights
+    gradients = {name: params for name, params in network.named_parameters() if 'weight' in name}
+
 
 # ---- Input - Network, model_name, maximum number of epochs, stop_threshold, batch_size (small), overwrite
 # -------- Network.eval() - turn off and drop or batch normalization
 # -------- Create a small dataloader
 # -------- every call load a new batch from the training set
 # -------- Pass one batch through training - single training loss.backward(), loss function defined inside
-
