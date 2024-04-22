@@ -255,14 +255,13 @@ class BaseNetwork(nn.Module):
         super().__init__()
         layers = []
         # ----First Layer
-        layers[0] = nn.Linear(input_size, hidden_layers[0])
-
+        layers += [nn.Linear(input_size, hidden_layers[0]), act_function]
         # ----Hidden Layers
         for i in range(1, len(hidden_layers)):
             layers += [nn.Linear(hidden_layers[i - 1], hidden_layers[i]), act_function]
 
         # ----Output Layer
-        layers += nn.Linear(hidden_layers[-1], noutput_classes)
+        layers += [nn.Linear(hidden_layers[-1], noutput_classes)]
         self.layers = nn.Sequential(*layers)
 
         # ----Storing hyperparameters in a dictionary
@@ -373,8 +372,8 @@ train_dataset = FashionMNIST(root=dataset_path, train=True, transform=transform_
 test_dataset = FashionMNIST(root=dataset_path, train=False, transform=transform_pipeline, download=True)
 
 train_size = len(train_dataset)
-train_length, val_length = 0.8 * train_size, 0.2 * train_size
-
+train_length, val_length = int(0.8 * train_size), int(0.2 * train_size)
+print(f"train length is: {train_length}")
 """
 Each observation in the training set consists of a tuple (image, label). The images are black and white, consists of
 a single channel
@@ -393,7 +392,7 @@ test_loader = data.DataLoader(test_dataset, batch_size=1024, shuffle=True)
 def visualize_gradient(network):
     """
     :param network: Object of class BaseNetwork
-    :return: Plotly line plot of estimated gradients through different layers
+    :return: Plotly histogram (subplot) of estimated gradients for the weights for different activation functions through different layers
     """
 
     network.eval()  # turn off dropout or batch normalization
@@ -412,11 +411,37 @@ def visualize_gradient(network):
     # Backpropagation
     loss.backward()
     # Access the estimated gradient - only restricted to weights
-    gradients = {name: params for name, params in network.named_parameters() if 'weight' in name}
+    gradients = {name: params.grad.data.view(-1).clone().numpy() for name, params in network.named_parameters() if
+                 'weight' in name}
+    network.zero_grad()
+
+    # Plotly
+    trace_list = []
+    for key in gradients:
+        trace = go.Histogram(x=gradients[key])
+        trace_list += [trace]
+
+    return trace_list
 
 
-# ---- Input - Network, model_name, maximum number of epochs, stop_threshold, batch_size (small), overwrite
-# -------- Network.eval() - turn off and drop or batch normalization
-# -------- Create a small dataloader
-# -------- every call load a new batch from the training set
-# -------- Pass one batch through training - single training loss.backward(), loss function defined inside
+# ---- Call the visualization function
+# - add labels to the subplots
+# - make font smaller
+# - turn off legend
+ncolumns = nhidden_layers = len(BaseNetwork.__init__.__defaults__[-1])+1  # number of hidden layers
+nrows = len(act_fn_by_name)
+figure2 = make_subplots(rows=nrows, cols=ncolumns)
+curr_row = 1
+for i, activation_fn_name in enumerate(act_fn_by_name):
+    activation_function = act_fn_by_name[activation_fn_name]()
+
+    network_actfn = BaseNetwork(act_function=activation_function)
+    trace_list = visualize_gradient(network_actfn)  # Everytime a new network object is sent
+    curr_col = 1
+    for trace in trace_list:
+
+        figure2.append_trace(trace, curr_row, curr_col)
+        curr_col += 1
+    curr_row += 1
+
+figure2.write_html("gradeints_backpropagation.html")
