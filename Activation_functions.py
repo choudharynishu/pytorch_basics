@@ -40,7 +40,7 @@ import matplotlib.pyplot as plt
 from plotly.subplots import make_subplots
 
 # ---------------------------------------------------Reproducibility-------------------------------------------------- #
-seed = 17  # preference for a prime number
+seed = 42  # preference for a prime number
 np.random.seed(seed)
 
 # PyTorch Documentation on reproducibility: https://pytorch.org/docs/stable/notes/randomness.html
@@ -198,7 +198,7 @@ act_fn_by_name = {
     "relu": ReLU,
     "leakyrelu": LeakyReLU,
     "elu": ELU,
-    "swish": Swish
+     "swish": Swish
 }
 
 
@@ -239,6 +239,7 @@ for i, (act_func, act_func_nam) in enumerate(zip(activation_funcs, activation_fu
     else:
         curr_col += 1
 figure.write_html('activation_gradient_plot.html')
+
 
 
 # --------------------------------------------Experiment on FashionMNIST Dataset-------------------------------------- #
@@ -373,7 +374,7 @@ test_dataset = FashionMNIST(root=dataset_path, train=False, transform=transform_
 
 train_size = len(train_dataset)
 train_length, val_length = int(0.8 * train_size), int(0.2 * train_size)
-print(f"train length is: {train_length}")
+
 """
 Each observation in the training set consists of a tuple (image, label). The images are black and white, consists of
 a single channel
@@ -400,7 +401,7 @@ def visualize_gradient(network):
     train_small_loader = data.DataLoader(train_set, batch_size=128, shuffle=True)
     # extract input image and related labels from the next batch
     image, label = next(iter(train_small_loader))
-    print(f"Length of smaller dataset: {len(image)}")
+
     # For visualization purposes only single training step will be performed with every function call
     # Zero out the gradients - such that estimated gradients in this step don't accumulate from previous step
     network.zero_grad()
@@ -418,7 +419,7 @@ def visualize_gradient(network):
     # Plotly
     trace_list = []
     for key in gradients:
-        trace = go.Histogram(x=gradients[key])
+        trace = go.Histogram(x=gradients[key], name=f'{key}')
         trace_list += [trace]
 
     return trace_list
@@ -427,8 +428,7 @@ def visualize_gradient(network):
 # ---- Call the visualization function
 # - add labels to the subplots
 # - make font smaller
-# - turn off legend
-ncolumns = nhidden_layers = len(BaseNetwork.__init__.__defaults__[-1])+1  # number of hidden layers
+ncolumns = nhidden_layers = len(BaseNetwork.__init__.__defaults__[-1]) + 1  # number of hidden layers
 nrows = len(act_fn_by_name)
 figure2 = make_subplots(rows=nrows, cols=ncolumns)
 curr_row = 1
@@ -437,11 +437,76 @@ for i, activation_fn_name in enumerate(act_fn_by_name):
 
     network_actfn = BaseNetwork(act_function=activation_function)
     trace_list = visualize_gradient(network_actfn)  # Everytime a new network object is sent
+    #print(trace_list)
     curr_col = 1
     for trace in trace_list:
-
         figure2.append_trace(trace, curr_row, curr_col)
         curr_col += 1
     curr_row += 1
+    del trace, trace_list
 
-figure2.write_html("gradeints_backpropagation.html")
+figure2.update_layout(showlegend=False)
+figure2.write_html("gradients_backpropagation.html")
+"""
+1. Estimated gradients for Sigmoid activation at the input layer are very small,however they are very large at output layer
+2. For ReLU the value of gradients is zero after layer#2
+3. 
+"""
+
+
+# ------------------------------------------Training--------------------------------------------- #
+def train_model(network, model_name, max_epochs=50, stop_iteration=7, batch_size=256, overwrite=False):
+    """
+    Train a model on the training set of FashionMNIST
+    :param network: BaseNetwork object
+    :param model_name: (str) Name of the model, used for creating checkpoint
+    :param max_spochs: Maximum number of epochs to train for
+    :param stop_iteration: Number of iterations to stop training if no performance gain observed for validation set
+    :param batch_size: size of batch used for training
+    :param overwrite: Whether or not to overwrite saved checkpoint. Default=False, skip training
+    :return: Trained
+    """
+    file_exists = os.path.isfile(_get_model_file(checkpoint_path, model_name))
+    if file_exists and not overwrite:
+        print("Model file already exists. Skipping training...")
+    else:
+        if file_exists:
+            print("Model file exists, but will be overwritten...")
+
+    # ---- Defining optimizer, loss function, and Data Loader
+    optimizer = optim.SGD(network.parameters(), lr=1e-2, momentum=0.9)
+    loss_function = nn.CrossEntropyLoss()  # check why not F.cross_entropy
+
+    # ---- Training
+
+    for epoch in range(max_epochs):
+        network.train()
+        true_predictions, count = 0, 0  # To track accuracy
+        for image, label in tqdm(train_loader, desc=f"Epoch {epoch + 1}"):
+            optimizer.zero_grad()
+            predictions = network(image)
+
+            loss = loss_function(predictions, label)
+            loss.backward()
+            optimizer.step()
+
+            true_predictions += (predictions.argmax(dim=-1) == label).sum()
+            count += label.shape[0]
+
+        train_accuracy = true_predictions/count
+
+    # ---- Validation
+    validation_accuracy = test_model(network, validation_loader)
+
+
+def test_model(network, test_loader):
+    network.eval()
+    true_predictions, count =0.0, 0
+    for image, label in tqdm(test_loader):
+        with torch.no_grad():
+            predictions = network(image)
+            true_predictions += (predictions.argmax(dim=-1) == label).sum()
+            count += label.shape[0]
+
+    test_accuracy = true_predictions / count
+    return test_accuracy
