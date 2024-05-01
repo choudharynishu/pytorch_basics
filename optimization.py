@@ -8,6 +8,7 @@ Nishu Choudhary
 import os
 import json
 import math
+import random
 import numpy as np
 import pandas as pd
 
@@ -22,19 +23,89 @@ import torch.optim as optim
 # Import for Data
 import torch.utils.data as data
 from torch.utils.data import DataLoader
+from torchvision.datasets import FashionMNIST
+from torchvision import transforms
 
 # Imports for visualization
 import plotly.graph_objects as go
 from tqdm import tqdm
 
 # ---------------------------------------------------Reproducibility-------------------------------------------------- #
-seed = 42  # preference for a prime number
-np.random.seed(seed)
+seed = 13  # preference for a prime number
 
-# PyTorch Documentation on reproducibility: https://pytorch.org/docs/stable/notes/randomness.html
-torch.manual_seed(seed)  # to seed the random number generation for all (both CPU and CUDA) devices
+
+def seeding_fn(seed):
+    """
+    :param seed: seed for pseudo random generator
+    :return: None
+    """
+    # ------- Standard seeding operations
+    # Seeding Numpy operations
+    np.random.seed(seed)
+    # Seeding PyTorch operations for all (both CPU and CUDA) devices
+    torch.manual_seed(seed)
+    # Seeding for other Python operations
+    random.seed(seed)
+    # ------- Additional operations for GPU operations:
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+        # Turn off CUDA convolutional benchmarking - ensures CUDA selects the same algorithm every time
+        torch.backends.cudnn.benchmark = False
+        # Ensures the (same) selected algorithm's non-deterministic parts are off
+        torch.backends.cudnn.deterministic = True
+
+        # Filling uninitialized memory
+        torch.utils.deterministic.fill_uninitialized_memory = True
+
+        # ------Later, while defining the Dataloader class
+        # Preserving reproducibility for DataLoader class - using worker_init_fn() and generator
+        """
+        g = torch.Generator
+        g.manual_seed(seed)
+        
+        DataLoader(dataset, 
+                    batch_size=batch_size,
+                    num_workers=num_workers,
+                    worker_init_fn=seeding_fn,
+                    generator=g)
+        """
+    return None
+
+
 # ---------------------------------------------------Locations-------------------------------------------------------- #
+# Dataset path - location to download the data
+dataset_path = "./data"
+# Path to store runs - checkpoint path
+checkpoint_path = "./optimization/"
+# Create checkpoint directory, exist_ok = True (don't raise FileExistError if directory exists
+os.makedirs(checkpoint_path, exist_ok=True)
 # ---------------------------------------------------Dataset---------------------------------------------------------- #
+"""
+The FashionMNIST dataset has 10 output classes with each data point containing a tuple of (PILimage, class_label). 
+The image is of dimension 28 * 28 and should be converted to a tensor. The conversion of PIL image into a tensor 
+can be done using an object created using transforms.ToTensor().
+ 
+From documentation, 
+transforms.ToTensor(): converts a PIL Image or ndarray (H*W*C) in the range of [0, 255] to a torch.FloatTensor 
+(C * H * W) in range of [0.0, 1.0].
+"""
+# ----- Data Transformation Pipeline
+transform_pipeline = transforms.Compose([transforms.ToTensor()])
+# ----- Load the Dataset
+train_dataset = FashionMNIST(root=dataset_path, train=True, transform=transform_pipeline, download=True)
+test_dataset = FashionMNIST(root=dataset_path, train=False, transform=transform_pipeline, download=True)
+# ----- Check the range of a random tensor from the training_dataset
+
+# ----- Divide the dataset into Training and Validation set
+train_size = len(train_dataset)
+train_length, val_length = int(0.8 * train_size), int(0.2 * train_size) # Divide data by 80-20 rule
+train_set, validation_set = torch.utils.data.random_split(train_dataset, [train_length, val_length])
+# ----- Create Dataloader, to iterate through the data batches
+train_loader = data.DataLoader(train_set, batch_size=1024, shuffle=True)
+validation_loader = data.DataLoader(validation_set, batch_size=1024, shuffle=True)
+test_loader = data.DataLoader(test_dataset, batch_size=1024, shuffle=True)
 # ---------------------------------------------------Neural Network Architecture-------------------------------------- #
 # ---------------------------------------------------Visualizations--------------------------------------------------- #
 # ---------------------------------------------------Initialization Techniques---------------------------------------- #
