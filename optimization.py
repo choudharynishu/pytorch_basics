@@ -109,7 +109,13 @@ validation_loader = data.DataLoader(validation_set, batch_size=1024, shuffle=Tru
 test_loader = data.DataLoader(test_dataset, batch_size=1024, shuffle=True)
 # ---------------------------------------------------Neural Network Architecture-------------------------------------- #
 class BaseNetwork(nn.Module):
-    def __init__(self, activation_func=nn.Sigmoid(), input_size=784, output_classes=10, hidden_layers=[512, 256, 256, 128]):
+    def __init__(self, activation_func, input_size=784, output_classes=10, hidden_layers=[512, 256, 256, 128]):
+        """
+        :param activation_func: Activation or Squashing function
+        :param input_size: Size of the input class, default =784
+        :param output_classes: Number of classes to be categorized into, default MNIST =10
+        :param hidden_layers: A list of integers specifying the hidden layer sizes in the NN, length of the list number of layers
+        """
         super().__init__()
         layers = []
         input_dims = [input_size]+hidden_layers
@@ -117,10 +123,14 @@ class BaseNetwork(nn.Module):
         for (input_dim, output_dim) in zip(input_dims, output_dims):
             layers += [nn.Linear(input_dim, output_dim), activation_func]
         self.layers = nn.Sequential(*layers)
-        print(layers)
 
-model = BaseNetwork()
-
+        # ----Storing hyperparameters in a dictionary
+        self.config = {"act_function": activation_func.config, "input_size": input_size, "num_classes": output_classes,
+                       "hidden_layers": hidden_layers}
+    def forward(self, x):
+        x = x.view(x.size(0), -1)  # Reshape the image to a flat vector
+        out = self.layers(x)
+        return out
 # ---------------------------------------------------Visualizations--------------------------------------------------- #
 # ---------------------------------------------------Initialization Techniques---------------------------------------- #
 # ------- Constant Initialization
