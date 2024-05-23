@@ -164,7 +164,7 @@ class ReLU(activation_functions):
 
 
 class LeakyReLU(activation_functions):
-    # Needs an instantiation function because of special parameter 'alpha'
+    # Needs an instantiation function because of special parameter 'alpha', this parameter needs to be accessible
     # Default value of alpha is 0.1
     def __init__(self, alpha=0.1):
         super().__init__()
