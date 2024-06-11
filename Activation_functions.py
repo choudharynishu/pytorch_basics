@@ -213,7 +213,7 @@ def grad_estimate(activation_func, x):
     # Clone the input tensor and turn on requires_grad=True
     x = x.clone().requires_grad_()
     z = activation_func(x)  # This implicitly calls activation_function.forward(x)
-    z.sum().backward()
+    z.sum().backward() #z.sum() - computes the sum of all tensors and then
     return x.grad
 
 
