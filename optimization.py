@@ -86,40 +86,28 @@ os.makedirs(checkpoint_path, exist_ok=True)
 The FashionMNIST dataset has 10 output classes with each data point containing a tuple of (PILimage, class_label). 
 The image is of dimension 28 * 28 and should be converted to a tensor. The conversion of PIL image into a tensor 
 can be done using an object created using transforms.ToTensor().
- 
-From documentation, 
-transforms.ToTensor(): converts a PIL Image or ndarray (H*W*C) in the range of [0, 255] to a torch.FloatTensor 
-(C * H * W).
 """
-# ----- Data Transformation Pipeline
-transform_pipeline = transforms.Compose([transforms.ToTensor(),
-                                         transforms.Normalize((0.2861,), (0.3530,))])
-# ----- Load the Dataset
-train_dataset = FashionMNIST(root=dataset_path, train=True, transform=transform_pipeline, download=True)
-test_dataset = FashionMNIST(root=dataset_path, train=False, transform=transform_pipeline, download=True)
+# Define a Transformation pipeline - this will be provided as input to training and test set objects
+transformation = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.2861,), (0.3530,))])
 
-# ----- Check the range of a random tensor from the training_dataset
-print(f"Mean of the tensors in the Training is: {(train_dataset.data.float()).mean().item()}")
+# Define training, validation, and test datasets
+# Return type is Torchvision Dataset - like all datasets __getitem__ and __len__ methods are present
+training_data = FashionMNIST(root=dataset_path, train=True, transform=transformation, download=True)
+training_data, validation_data = data.random_split(training_data, lengths=[50000, 10000])
+# (training_data[1][0].shape) returns (number of channels, Height, Width) of the first input image
 
-# ----- Divide the dataset into Training and Validation set
-train_size = len(train_dataset)
-train_length, val_length = int(0.8 * train_size), int(0.2 * train_size) # Divide data by 80-20 rule
-train_set, validation_set = torch.utils.data.random_split(train_dataset, [train_length, val_length])
+#test_data = FashionMNIST(root=dataset_path, train=False, transform=transformation, download=True)
 
-# ----- Create Dataloader, to iterate through the data batches
-train_loader = data.DataLoader(train_set, batch_size=1024, shuffle=True)
-validation_loader = data.DataLoader(validation_set, batch_size=1024, shuffle=True)
-test_loader = data.DataLoader(test_dataset, batch_size=1024, shuffle=True)
-
+"""
 # ---------------------------------------------------Neural Network Architecture-------------------------------------- #
 class BaseNetwork(nn.Module):
     def __init__(self, activation_func, input_size=784, output_classes=10, hidden_layers=[512, 256, 256, 128]):
-        """
+
         :param activation_func: Activation or Squashing function
         :param input_size: Size of the input class, default =784
         :param output_classes: Number of classes to be categorized into, default MNIST =10
         :param hidden_layers: A list of integers specifying the hidden layer sizes in the NN, length of the list number of layers
-        """
+    
         super().__init__()
         layers = []
         input_dims = [input_size]+hidden_layers
@@ -146,3 +134,4 @@ class BaseNetwork(nn.Module):
 # ------- SGD Momentum
 # ------- Adam
 # ------- Kaiming Initialization
+"""
