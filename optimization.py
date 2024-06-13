@@ -88,41 +88,45 @@ The image is of dimension 28 * 28 and should be converted to a tensor. The conve
 can be done using an object created using transforms.ToTensor().
 """
 # Define a Transformation pipeline - this will be provided as input to training and test set objects
+#transformation = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.2861,), (0.3530,))])
 transformation = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.2861,), (0.3530,))])
-
 # Define training, validation, and test datasets
 # Return type is Torchvision Dataset - like all datasets __getitem__ and __len__ methods are present
-training_data = FashionMNIST(root=dataset_path, train=True, transform=transformation, download=True)
-training_data, validation_data = data.random_split(training_data, lengths=[50000, 10000])
-# (training_data[1][0].shape) returns (number of channels, Height, Width) of the first input image
+training_dataset = FashionMNIST(root=dataset_path, train=True, transform=transformation, download=True)
+training_data, validation_data = data.random_split(training_dataset, lengths=[50000, 10000])
 
-#test_data = FashionMNIST(root=dataset_path, train=False, transform=transformation, download=True)
+test_data = FashionMNIST(root=dataset_path, train=False, transform=transformation, download=True)
 
-"""
+#Create Dataloaders
+training_loader = DataLoader(training_data, batch_size=1024, shuffle=True, drop_last=False)
+val_loader = DataLoader(validation_data, batch_size=1024, shuffle=False, drop_last=False)
+test_loader = DataLoader(test_data, batch_size=1024, shuffle=False, drop_last=False)
 # ---------------------------------------------------Neural Network Architecture-------------------------------------- #
 class BaseNetwork(nn.Module):
-    def __init__(self, activation_func, input_size=784, output_classes=10, hidden_layers=[512, 256, 256, 128]):
-
-        :param activation_func: Activation or Squashing function
-        :param input_size: Size of the input class, default =784
-        :param output_classes: Number of classes to be categorized into, default MNIST =10
-        :param hidden_layers: A list of integers specifying the hidden layer sizes in the NN, length of the list number of layers
-    
-        super().__init__()
+    def __init__(self, activation_function, input_dim=784, output_dim=10, hidden_layers=[512, 256, 256, 128]):
+        super.__init__()
         layers = []
-        input_dims = [input_size]+hidden_layers
-        output_dims = hidden_layers + [output_classes]
-        for (input_dim, output_dim) in zip(input_dims, output_dims):
-            layers += [nn.Linear(input_dim, output_dim), activation_func]
-        self.layers = nn.Sequential(*layers)
+        # ----First Layer
+        layers += [nn.Linear(input_dim, hidden_layers[0]), activation_function]
+        # ----Hidden Layers
+        for i in range(1, len(hidden_layers)):
+            layers += [nn.Linear(hidden_layers[i - 1], hidden_layers[i]), activation_function]
 
-        # ----Storing hyperparameters in a dictionary
-        self.config = {"act_function": activation_func.config, "input_size": input_size, "num_classes": output_classes,
-                       "hidden_layers": hidden_layers}
+        # ----Output Layers
+        layers+= [nn.Linear(hidden_layers[-1], output_dim)]
+
+        self.layers = nn.Sequential(*layers)
+        self.config = {'activation_func': activation_function.__class__name,
+                       'input_size': input_dim,
+                       'num_classes': output_dim,
+                       'hidden_layers': hidden_layers
+                       }
+
     def forward(self, x):
         x = x.view(x.size(0), -1)  # Reshape the image to a flat vector
         out = self.layers(x)
         return out
+
 # ---------------------------------------------------Visualizations--------------------------------------------------- #
 # ---------------------------------------------------Initialization Techniques---------------------------------------- #
 # ------- Constant Initialization
@@ -134,4 +138,3 @@ class BaseNetwork(nn.Module):
 # ------- SGD Momentum
 # ------- Adam
 # ------- Kaiming Initialization
-"""
