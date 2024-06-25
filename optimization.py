@@ -27,9 +27,16 @@ from torchvision.datasets import FashionMNIST
 from torchvision import transforms
 
 # Imports for visualization
+from scipy import stats
 import plotly.graph_objects as go
 from tqdm import tqdm
+from plotly.subplots import make_subplots
 
+import matplotlib.pyplot as plt
+from matplotlib import cm
+import seaborn as sns
+
+sns.set()
 # ---------------------------------------------------Reproducibility-------------------------------------------------- #
 seed = 13  # preference for a prime number
 
@@ -88,7 +95,7 @@ The image is of dimension 28 * 28 and should be converted to a tensor. The conve
 can be done using an object created using transforms.ToTensor().
 """
 # Define a Transformation pipeline - this will be provided as input to training and test set objects
-#transformation = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.2861,), (0.3530,))])
+# transformation = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.2861,), (0.3530,))])
 transformation = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.2861,), (0.3530,))])
 # Define training, validation, and test datasets
 # Return type is Torchvision Dataset - like all datasets __getitem__ and __len__ methods are present
@@ -97,26 +104,29 @@ training_data, validation_data = data.random_split(training_dataset, lengths=[50
 
 test_data = FashionMNIST(root=dataset_path, train=False, transform=transformation, download=True)
 
-#Create Dataloaders
+# Create Dataloaders
 training_loader = DataLoader(training_data, batch_size=1024, shuffle=True, drop_last=False)
 val_loader = DataLoader(validation_data, batch_size=1024, shuffle=False, drop_last=False)
 test_loader = DataLoader(test_data, batch_size=1024, shuffle=False, drop_last=False)
+
+
 # ---------------------------------------------------Neural Network Architecture-------------------------------------- #
 class BaseNetwork(nn.Module):
     def __init__(self, activation_function, input_dim=784, output_dim=10, hidden_layers=[512, 256, 256, 128]):
-        super.__init__()
+        super().__init__()
         layers = []
         # ----First Layer
+        # Weights and biases in PyTorch are initialized using Kaiming Initialization (He initialization)
         layers += [nn.Linear(input_dim, hidden_layers[0]), activation_function]
         # ----Hidden Layers
         for i in range(1, len(hidden_layers)):
             layers += [nn.Linear(hidden_layers[i - 1], hidden_layers[i]), activation_function]
 
         # ----Output Layers
-        layers+= [nn.Linear(hidden_layers[-1], output_dim)]
+        layers += [nn.Linear(hidden_layers[-1], output_dim)]
 
         self.layers = nn.Sequential(*layers)
-        self.config = {'activation_func': activation_function.__class__name,
+        self.config = {'activation_func': activation_function.config['name'],
                        'input_size': input_dim,
                        'num_classes': output_dim,
                        'hidden_layers': hidden_layers
@@ -124,13 +134,181 @@ class BaseNetwork(nn.Module):
 
     def forward(self, x):
         x = x.view(x.size(0), -1)  # Reshape the image to a flat vector
-        out = self.layers(x)
-        return out
+        # Since the BaseNetwork is defined using nn.Sequential in the forward pass we dont need to process each
+        # layer using a loop. Alternatively, use following:
+        # for l in self.layers:
+        #       x = l(x)
+        x = self.layers(x)
+        return x
+
 
 # ---------------------------------------------------Visualizations--------------------------------------------------- #
+
+# --- Define Identity function as the activation function to demonstrate the impact of initialization
+class Identity(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.name = self.__class__.__name__
+        self.config = {"name": self.name}
+
+    def forward(self, x):
+        return x
+
+
+# --- Two visualizations are needed,
+#       a. Visualize weights distribution inside the network
+#       b. Visualize gradients that the parameters at different layers receive
+
+# --- Visualization function - weights & Parameters
+def plot_distributions(dict_val):
+    """
+    :param dict_val: Python dict with layer number as the key and values as either weights or gradient of the weights
+    :param xlabel: (default  = 'weights') xlabel to be assigned to the plots
+    :return: A Plotly subplot figure with each subplot representing weights of each layer
+    """
+    number_of_layers = len(dict_val)
+    figure = make_subplots(1, number_of_layers)
+    for index, (key, value) in enumerate(dict_val.items()):
+        kernel_estimator = stats.gaussian_kde(value)
+        kde_x = np.linspace(min(value), max(value), 1000)
+        kde_y = kernel_estimator(kde_x)
+        figure.add_trace(go.Histogram(x=value, nbinsx=50, name=f'Layer: {key}'), row=1, col=index + 1)
+        figure.add_trace(go.Scatter(x=kde_x, y=kde_y, mode='lines'), row=1, col=index+1)
+    return figure
+
+
+# --- Function to access the weights of different layers
+def weight_distribution(network):
+    """
+    Access the weights for each layer in form of a dictionary for the given network. The weights will be stored in form
+    of a Python dictionary where the keys would represent the layer number while the values will store the parameter vector
+    :param network: Object of class BaseNetwork whose weights need to be visualized
+    :return: None (directly added to the histogram)
+    """
+    weights = {}
+    for name, parameter in network.named_parameters():
+        # Conditional to ignore the bias vectors
+        if 'bias' in name:
+            continue
+        layer_number = name.split('.')[1]
+        # detach() function returns a new tensor (storage?) removed from the computational graph, which implies
+        # gradients for the detached tensor will not be tracked by the optimizer
+        weights[layer_number] = parameter.detach().view(-1).numpy()
+
+    weight_viz = plot_distributions(weights)
+    weight_viz.show()
+    return None
+
+
+# ---Function to access the gradients associated with weights of each layer
+def gradient_distribution(network):
+    """
+    Access the gradients of weights for each layer in form of a dictionary for the given network. The graidents will be
+    stored in form of a Python dictionary where the keys would represent the layer number while
+    the values will store the gradient value vector
+    :param network: Object of class BaseNetwork whose gradients need to be visualized
+    :return: None (directly added to the histogram)
+    """
+    gradients = {}
+
+    # ---Generate gradients of the weights by single training step
+
+    # Set the network to evaluation mode - turn off batch normalization or Dropouts
+    network.eval()
+    # Create a small training data loader - one can use previously created training_loader but its larger in size
+    training_small_loader = DataLoader(training_data, batch_size=64, shuffle=True)
+    # Iterate through the created dataloader
+    train_features, train_labels = next(iter(training_small_loader))
+
+    # ---Pass one batch through the network and estimate the gradients for the weights
+    # Reset the gradients of all optimized torch tensors - clear out old gradients
+    network.zero_grad()
+    # Estimate predictions
+    predicted_labels = network(train_features)
+    # Estimate the loss function
+    loss = F.cross_entropy(predicted_labels, train_labels)
+    # Compute new gradients
+    loss.backward()
+    # Access the gradients
+    for name, parameters in network.named_parameters():
+        # Conditional to ignore the bias vectors
+        if 'bias' in name:
+            continue
+        layer_number = name.split('.')[1]
+        gradients[layer_number] = parameters.grad.data.view(-1).numpy()
+
+    # Printing variance
+    for key in sorted(gradients.keys()):
+        print(f"Layer {key} gradient variance: {np.var(gradients[key])}")
+    gradient_viz = plot_distributions(gradients)
+    gradient_viz.show()
+
+# --- Function to access activations
+def activation_distribution(network):
+    """
+    Access the activations (output of the linear layers) in form of a dictionary for the given network.
+    The activation values will be stored in form of a Python dictionary where the keys would represent the layer number
+    while the values will store the activation value vector
+    :param network: Object of class BaseNetwork whose activations need to be visualized
+    :return: None (directly added to the histogram)
+    """
+    # Activations can be accessed using the forward hook
+    activations = {}
+    # Set the network to evaluation mode - turn off batch normalization or Dropouts
+    network.eval()
+    # Create a small training data loader - one can use previously created training_loader but its larger in size
+    training_small_loader = DataLoader(training_data, batch_size=64, shuffle=True)
+    # Iterate through the created dataloader
+    train_features, train_labels = next(iter(training_small_loader))
+
+    features = train_features.view(train_features.shape[0], -1)
+    # Temporarily set all requires_grad flag to False - reduce memory usage and computational cost
+    with torch.no_grad():
+        for layer_index, layer in enumerate(network.layers):
+            features = layer(features)
+            if isinstance(layer, nn.Linear):
+                activations[f"Layer {layer_index}"] = features.view(-1).detach().numpy()
+
+    activation_viz = plot_distributions(activations)
+    activation_viz.show()
+
+    # Printing variance
+    for key in sorted(activations.keys()):
+        print(f"Layer {key} activation variance: {np.var(activations[key])}")
+
+    return None
+
+
 # ---------------------------------------------------Initialization Techniques---------------------------------------- #
 # ------- Constant Initialization
+def constant_initialization(network, constant_val=0.05):
+    """
+    :param network: (BaseNetwork) Object of class BaseNetwork whose parameters will be replaced by a constant value
+    :param constant_val: (Float) Constant value for which all parameters (weights and biases) will be initialized
+    :return: None
+    """
+    for name, parameters in network.named_parameters():
+        parameters.data.fill_(constant_val)
+    return None
+
 # ------- Constant Variance
+def constant_variance(network, constant_val=0.01):
+    """
+    :param network: (BaseNetwork) Object of class BaseNetwork whose parameters will be replaced by a constant value
+    :param constant_val: (Float) Constant value for which all parameters' (weights and biases) variance be set to
+    :return: None
+    """
+    for name, parameters in network.named_parameters():
+        parameters.data.normal_(std=constant_val)
+    return None
+model = BaseNetwork(activation_function=Identity())
+constant_variance(model, constant_val=0.01)
+weight_distribution(model)
+gradient_distribution(model)
+activation_distribution(model)
+
+#print(model.layers[0].bias.shape)
+
 # ------- Xavier Initialization
 # ------- Kaiming Initialization
 # ---------------------------------------------------Optimization Techniques------------------------------------------ #
