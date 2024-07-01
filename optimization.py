@@ -126,7 +126,7 @@ class BaseNetwork(nn.Module):
         layers += [nn.Linear(hidden_layers[-1], output_dim)]
 
         self.layers = nn.Sequential(*layers)
-        self.config = {'activation_func': activation_function.config['name'],
+        self.config = {'activation_func': activation_function.__class__.__name__,
                        'input_size': input_dim,
                        'num_classes': output_dim,
                        'hidden_layers': hidden_layers
@@ -173,7 +173,7 @@ def plot_distributions(dict_val):
         kde_x = np.linspace(min(value), max(value), 1000)
         kde_y = kernel_estimator(kde_x)
         figure.add_trace(go.Histogram(x=value, nbinsx=50, name=f'Layer: {key}'), row=1, col=index + 1)
-        figure.add_trace(go.Scatter(x=kde_x, y=kde_y, mode='lines'), row=1, col=index+1)
+        figure.add_trace(go.Scatter(x=kde_x, y=kde_y, mode='lines'), row=1, col=index + 1)
     return figure
 
 
@@ -243,6 +243,7 @@ def gradient_distribution(network):
     gradient_viz = plot_distributions(gradients)
     gradient_viz.show()
 
+
 # --- Function to access activations
 def activation_distribution(network):
     """
@@ -291,6 +292,7 @@ def constant_initialization(network, constant_val=0.05):
         parameters.data.fill_(constant_val)
     return None
 
+
 # ------- Constant Variance
 def constant_variance(network, constant_val=0.01):
     """
@@ -301,18 +303,172 @@ def constant_variance(network, constant_val=0.01):
     for name, parameters in network.named_parameters():
         parameters.data.normal_(std=constant_val)
     return None
-model = BaseNetwork(activation_function=Identity())
-constant_variance(model, constant_val=0.01)
-weight_distribution(model)
-gradient_distribution(model)
-activation_distribution(model)
 
-#print(model.layers[0].bias.shape)
+
+# def _bias_constant(constant_value=0): - can change the bias term later on
+
 
 # ------- Xavier Initialization
+def xavier_init(network):
+    # Iterate over all weights and biases
+    for name, parameter in network.named_parameters():
+        # Initialize the bias term to be zero
+        if name.endswith('.bias'):
+            parameter.data.fill_(0)
+        else:
+            bound = math.sqrt(6 / (parameter.data.size(0) + parameter.data.size(1)))
+            parameter.data.uniform_(-1 * bound, bound)
+
+
 # ------- Kaiming Initialization
+def kaiming_init(network):
+    # Iterate over all weights and biases
+    for name, parameter in network.named_parameters():
+        # Initialize the bias term to be zero
+        if name.endswith('.bias'):
+            parameter.data.fill_(0)
+        elif 'layer0' in name:
+
+            parameter.data.normal_(0, std=1 / math.sqrt(parameter.data.size(1)))
+        else:
+            parameter.data.normal_(0, std=math.sqrt(2) / math.sqrt(parameter.data.size(1)))
+
+
+network = BaseNetwork(activation_function=nn.ReLU())
+kaiming_init(network)
+weight_distribution(network)
+gradient_distribution(network)
+activation_distribution(network)
+
+activation_fn_name = {
+    "tanh": nn.Tanh,
+    "relu": nn.ReLU,
+    "identity": Identity
+}
+
+
+# ---------------------------------------------------Training & Testing ---------------------------------------------- #
+# ----------------------
+def _get_config_file(model_path, model_name):
+    return os.path.join(model_path, model_name, '.config')
+
+
+def _get_model_file(model_path, model_name):
+    return os.path.join(model_path, model_name, '.tar')
+
+
+def _get_result_file(model_path, model_name):
+    return os.path.join(model_path, model_name, '._results.json')
+
+
+def load_model(model_path, model_name, net=None):
+    """
+    Load pre-trained model, if the model instance is not defined then instantiate the instance or else load the state dictionary
+    :param model_path: (path-like object)
+    :param model_name: (str)
+    :param net: Object of class BaseNetwork
+    :return: The loaded model
+    """
+    config_file, model_file = _get_config_file(model_path, model_name), _get_model_file(model_path, model_name)
+    assert os.path.exists(config_file), f"Path doesn't exist:\n {config_file}\n"
+    assert os.path.exists(model_file), f"Path doesn't exist:\n {model_file}\n"
+    # --- Read the config file
+    with open(config_file, 'r') as f:
+        config_dictionary = json.load(f)
+
+    # --- Define the network object using config dictionary
+    if net is None:
+        act_function = config_dictionary['activation_func'].pop('name').lower()()
+        net = BaseNetwork(activation_function=act_function, **config_dictionary)
+
+    net.load_state_dict(torch.load(model_file))
+    return net
+
+
+def save_model(net, model_path, model_name):
+    """
+    Save configuration and model files
+    :param net: Object of class BaseNetwork
+    :param model_path: (path-like object)
+    :param model_name: (str)
+    """
+    config_dict = net.config
+    # --- Create directory, dont raise error if the directory already exists
+    os.makedirs(model_path, exist_ok=True)
+    # --- Extract configuration and model files path
+    config_file, model_file = _get_config_file(model_path, model_name), _get_model_file(model_path, model_name)
+    # --- Save configuration dictionary into configuration files
+    with open(config_file, 'w') as f:
+        json.dump(config_dict, f)
+
+    # --- Save model file into a state dictionary
+    torch.save(net.state_dict(), model_file)
+
+
+# ----------------------
+
+
+def training(net, model_name, optim_function, max_epochs=50, batch_size=256, overwrite=False):
+    """
+    Training function
+    :param net: Object of class BaseNetwork
+    :param model_name: (str) name of the
+    :param optim_function: (torch.optim.Optimizer class object)
+    :param max_epochs: (int/float) default = 50
+    :param batch_size: (int) default = 256
+    :param overwrite: (bool) default = False
+    :return:
+    """
+    # Check for results file already existing - if already exists and overwrite is False - skip training load results
+    # Else check if file exists print if file already exists
+    file_exists = os.path.isfile(_get_model_file(checkpoint_path, model_name))
+    if file_exists and not overwrite:
+        print(f"Model file exists. Skipping training")
+        with open(_get_result_file(checkpoint_path, model_name), 'r') as f:
+            results = json.load(f)
+    else:
+        if file_exists:
+            print(f"Model file exists but will be overwritten")
+
+        # --- Define optimizer, loss function, and use previously define dataloaders
+        optimizer = optim_function(net.parameters())
+        loss_function = nn.CrossEntropyLoss()
+
+        results = None
+        validation_Score = []
+        train_loss, train_accuracy = [], []
+
+        # --- Training
+        for epoch in tqdm(range(max_epochs)):
+            net.train()  # --- Batch normalization and Dropout layers would be on
+            true_predictions, total_observations = 0, 0
+            current_epoch = tqdm(training_loader, leave=False)
+            # -- Iterate through the Training DataLoader
+            for image, label in current_epoch:
+
+                # -- zero-out the gradient value
+                optimizer.zero_grad()
+
+                prediction = net(image)
+                loss_value = loss_function(prediction, label)
+
+                # -- Backpropagation
+                loss_value.backward()
+
+                # -- Update the parameters
+                optimizer.step()
+
+                # -- Statistics of this batch
+                train_loss.append([loss_value.item()])
+                true_predictions += (prediction.argmax(dim=-1) == label).sum().item()
+                total_observations += (label.shape[0])
+
+                current_epoch.set_description(f"Epoch: {epoch+1}: loss={loss_value.item():4.2f}")
+            train_accuracy.append(true_predictions/total_observations)
+
+    return None
+
 # ---------------------------------------------------Optimization Techniques------------------------------------------ #
 # ------- SGD Optimization
 # ------- SGD Momentum
 # ------- Adam
-# ------- Kaiming Initialization
