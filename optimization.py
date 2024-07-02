@@ -407,7 +407,6 @@ def save_model(net, model_path, model_name):
 
 # ----------------------
 
-
 def training(net, model_name, optim_function, max_epochs=50, batch_size=256, overwrite=False):
     """
     Training function
@@ -435,9 +434,10 @@ def training(net, model_name, optim_function, max_epochs=50, batch_size=256, ove
         loss_function = nn.CrossEntropyLoss()
 
         results = None
-        validation_Score = []
+        validation_accuracy = []
         train_loss, train_accuracy = [], []
-
+        # To keep track of best validation score  epoch
+        best_val_epoch = -1
         # --- Training
         for epoch in tqdm(range(max_epochs)):
             net.train()  # --- Batch normalization and Dropout layers would be on
@@ -459,15 +459,61 @@ def training(net, model_name, optim_function, max_epochs=50, batch_size=256, ove
                 optimizer.step()
 
                 # -- Statistics of this batch
-                train_loss.append([loss_value.item()])
+                train_loss.append(loss_value.item())
                 true_predictions += (prediction.argmax(dim=-1) == label).sum().item()
                 total_observations += (label.shape[0])
 
                 current_epoch.set_description(f"Epoch: {epoch+1}: loss={loss_value.item():4.2f}")
             train_accuracy.append(true_predictions/total_observations)
 
+            # ---- Validation
+            validation_acc = test_model(net, val_loader)
+            validation_accuracy.append(validation_acc)
+            # Keep track of best validation score -- and save that particular model - save model's state_dict()
+            if len(validation_accuracy) == 1 or validation_acc >= validation_accuracy[best_val_epoch]:
+                best_val_epoch = epoch
+                print(f" ----- Saving new best performing model")
+                save_model(net, checkpoint_path, model_name)
+
+        # Saving Results
+        if results is None:
+            # Load the model
+            load_model(checkpoint_path, model_name, net)
+            test_acc = test_model(net, test_loader)
+            results = {"test_acc": test_acc, "val_scores": validation_accuracy,
+                       "train_losses": train_loss, "train_scores": train_accuracy}
+            # Save results
+            with open(_get_result_file(checkpoint_path, model_name), 'w') as f:
+                json.dump(results, f)
+        # Plotting Training & Validation results
+        accuracy_figure = go.Figure(go.Scatter(x=list(range(1, max_epochs)), y=train_accuracy, mode='lines'))
+        accuracy_figure.add_trace(go.Scatter(x=list(range(1, max_epochs)), y=validation_accuracy, mode='lines'))
+        accuracy_figure.update_layout()
+        # Update Traces
+        # Save html figure
+
     return None
 
+
+def test_model(net, data_loader):
+    """
+    Test the trained model
+    :param net: Object of class BaseNetwork
+    :param data_loader: Validation or the test set loader
+    :return: Average accuracy over all batches
+    """
+    # Evaluation mode
+    net.eval()
+
+    true_pred, total_observations = 0, 0
+    with torch.no_grad():
+        for image, label in data_loader:
+            pred = net(image)
+            true_pred += (pred.argmax(dim=1) == label).sum().item()
+            total_observations += (label.shape[0])
+
+    test_accuracy = true_pred / total_observations
+    return test_accuracy
 # ---------------------------------------------------Optimization Techniques------------------------------------------ #
 # ------- SGD Optimization
 # ------- SGD Momentum
