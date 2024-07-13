@@ -38,7 +38,7 @@ import seaborn as sns
 
 sns.set()
 # ---------------------------------------------------Reproducibility-------------------------------------------------- #
-seed = 13  # preference for a prime number
+seed = 42  # preference for a prime number
 
 
 def seeding_fn(seed):
@@ -85,7 +85,7 @@ def seeding_fn(seed):
 # Dataset path - location to download the data
 dataset_path = "./data"
 # Path to store runs - checkpoint path
-checkpoint_path = "./optimization/"
+checkpoint_path = "../optimization/"
 # Create checkpoint directory, exist_ok = True (don't raise FileExistError if directory exists
 os.makedirs(checkpoint_path, exist_ok=True)
 # ---------------------------------------------------Dataset---------------------------------------------------------- #
@@ -334,11 +334,11 @@ def kaiming_init(network):
             parameter.data.normal_(0, std=math.sqrt(2) / math.sqrt(parameter.data.size(1)))
 
 
-network = BaseNetwork(activation_function=nn.ReLU())
-kaiming_init(network)
-weight_distribution(network)
-gradient_distribution(network)
-activation_distribution(network)
+test_network = BaseNetwork(activation_function=nn.ReLU())
+# kaiming_init(network)
+# weight_distribution(network)
+# gradient_distribution(network)
+# activation_distribution(network)
 
 activation_fn_name = {
     "tanh": nn.Tanh,
@@ -350,15 +350,15 @@ activation_fn_name = {
 # ---------------------------------------------------Training & Testing ---------------------------------------------- #
 # ----------------------
 def _get_config_file(model_path, model_name):
-    return os.path.join(model_path, model_name, '.config')
+    return os.path.join(model_path, f"{model_name}.config")
 
 
 def _get_model_file(model_path, model_name):
-    return os.path.join(model_path, model_name, '.tar')
+    return os.path.join(model_path, f"{model_name}.tar")
 
 
 def _get_result_file(model_path, model_name):
-    return os.path.join(model_path, model_name, '._results.json')
+    return os.path.join(model_path, f"{model_name}_results.json")
 
 
 def load_model(model_path, model_name, net=None):
@@ -431,6 +431,8 @@ def training(net, model_name, optim_function, max_epochs=50, batch_size=256, ove
 
         # --- Define optimizer, loss function, and use previously define dataloaders
         optimizer = optim_function(net.parameters())
+        print(optimizer)
+
         loss_function = nn.CrossEntropyLoss()
 
         results = None
@@ -445,7 +447,6 @@ def training(net, model_name, optim_function, max_epochs=50, batch_size=256, ove
             current_epoch = tqdm(training_loader, leave=False)
             # -- Iterate through the Training DataLoader
             for image, label in current_epoch:
-
                 # -- zero-out the gradient value
                 optimizer.zero_grad()
 
@@ -463,8 +464,8 @@ def training(net, model_name, optim_function, max_epochs=50, batch_size=256, ove
                 true_predictions += (prediction.argmax(dim=-1) == label).sum().item()
                 total_observations += (label.shape[0])
 
-                current_epoch.set_description(f"Epoch: {epoch+1}: loss={loss_value.item():4.2f}")
-            train_accuracy.append(true_predictions/total_observations)
+                current_epoch.set_description(f"Epoch: {epoch + 1}: loss={loss_value.item():4.2f}")
+            train_accuracy.append(true_predictions / total_observations)
 
             # ---- Validation
             validation_acc = test_model(net, val_loader)
@@ -486,11 +487,16 @@ def training(net, model_name, optim_function, max_epochs=50, batch_size=256, ove
             with open(_get_result_file(checkpoint_path, model_name), 'w') as f:
                 json.dump(results, f)
         # Plotting Training & Validation results
-        accuracy_figure = go.Figure(go.Scatter(x=list(range(1, max_epochs)), y=train_accuracy, mode='lines'))
-        accuracy_figure.add_trace(go.Scatter(x=list(range(1, max_epochs)), y=validation_accuracy, mode='lines'))
-        accuracy_figure.update_layout()
-        # Update Traces
-        # Save html figure
+        accuracy_figure = go.Figure(go.Scatter(x=list(range(1, max_epochs)), y=train_accuracy,
+                                               mode='lines', name=f"Training Accuracy"))
+        accuracy_figure.add_trace(go.Scatter(x=list(range(1, max_epochs)), y=validation_accuracy,
+                                             mode='lines', name=f"Validation Accuracy"))
+        accuracy_figure.update_layout(title='Dataset Samples',
+                                      xaxis_title='Epcoh No.',
+                                      yaxis_title='Accuracy',
+                                      )
+
+        accuracy_figure.write_html(os.path.join(checkpoint_path, 'Train_validate_accuracy.html'))
 
     return None
 
@@ -514,7 +520,226 @@ def test_model(net, data_loader):
 
     test_accuracy = true_pred / total_observations
     return test_accuracy
+
+
 # ---------------------------------------------------Optimization Techniques------------------------------------------ #
+# --- tester code
+# optimizer_function = optim.SGD
+# training(test_network, f"sample_07042024", optim.SGD)
+
+# ---------------------------------------------------Optimization Techniques------------------------------------------ #
+class OptimizerTemplate:
+    def __init__(self, params, lr):
+        self.params = list(params)
+        self.lr = lr
+
+    def zero_grad(self):
+        for p in self.params:
+            if p.grad is not None:
+                p.grad.detach_()
+                p.grad.zero_()
+
+    @torch.no_grad()
+    def step(self):
+        for p in self.params:
+            if p.grad is None:
+                continue
+            self.update_params(p)
+
+    def update_params(self, p):
+        return NotImplementedError
+
+
 # ------- SGD Optimization
+class SGD(OptimizerTemplate):
+    def __init__(self, params, lr):
+        super().__init__(params, lr)
+
+    def update_params(self, p):
+        p_update = -self.lr * p.grad
+        p.add_(p_update)
+
+
 # ------- SGD Momentum
+class SGDMomentum(OptimizerTemplate):
+    def __init__(self, params, lr, momentum):
+        super(SGDMomentum, self).__init__(params, lr)
+        self.momentum = momentum
+        self.param_momentum = {p: torch.zeros_like(p.data) for p in self.params}
+
+    def update_params(self, p):
+        self.param_momentum[p] = self.momentum * self.param_momentum[p] + (1 - self.momentum) * p.grad
+        p_update = -self.lr * self.param_momentum[p]
+        p.add_(p_update)
+
+
+# ------- RMSProp
+class RMSProp(OptimizerTemplate):
+    def __init__(self, params, lr, alpha=0.99, epsilon=1e-8):
+        super(RMSProp, self).__init__(params, lr)
+        self.alpha = alpha
+        self.epsilon = epsilon
+        self.param_velocity = {p: torch.zeros_like(p.data) for p in self.params}
+
+    def update_params(self, p):
+        self.param_velocity[p] = self.alpha * self.param_velocity[p] + (1 - self.alpha) * p.grad ** 2
+        p_update = (-self.lr / (torch.sqrt(self.param_velocity[p]) + self.epsilon)) * p.grad
+
+        p.add_(p_update)
+
+
 # ------- Adam
+class Adam(OptimizerTemplate):
+    def __init__(self, params, lr, beta_1=0.9, beta_2=0.999, epsilon=1e-8):
+        super().__init__(params, lr)
+        # Alternatively, can access through self.betas[0] = beta_1, self.betas[1] = beta_2
+        self.epsilon = epsilon
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
+        self.iteration = {p: 0 for p in self.params}  # Need to keep track of the number of iterations passed so far
+        self.param_velocity = {p: torch.zeros_like(p.data) for p in self.params}
+        self.param_momentum = {p: torch.zeros_like(p.data) for p in self.params}
+
+    def update_params(self, p):
+        self.iteration[p] += 1
+        self.param_momentum[p] = self.beta_1 * self.param_momentum[p] + (1 - self.beta_1) * p.grad
+        self.param_velocity[p] = self.beta_2 * self.param_velocity[p] + (1 - self.beta_2) * p.grad * p.grad
+
+        p_scaled_momentum = self.param_momentum[p] / (1 - self.beta_1 ** self.iteration[p])
+        p_scaled_velocity = self.param_velocity[p] / (1 - self.beta_2 ** self.iteration[p])
+
+        p_update = (-self.lr / (torch.sqrt(p_scaled_velocity) + self.epsilon)) * p_scaled_momentum
+
+        p.add_(p_update)
+
+
+# -------------------------------------------------Test Run----------------------------------------------------------- #
+model_test = BaseNetwork(activation_function=nn.ReLU())
+kaiming_init(model_test)
+training(model_test, f"sample_07062024", lambda params: SGD(params, lr=1e-1),
+         max_epochs=30, batch_size=256)
+
+# -------------------------------------------------Loss Surfaces------------------------------------------------------ #
+# --- Pathological Curve
+"""These are the types of curves which have steep gradient in one direction while a flat surface in another. This type of 
+loss surface makes it difficult to optimize """
+
+
+def pathological_curve_loss(w1, w2):
+    x1_loss = torch.tanh(w1) ** 2 + 0.01 * torch.abs(w1)  # Steep direction
+    x2_loss = torch.sigmoid(w2)  # Flat surface
+    return x1_loss + x2_loss
+
+
+# ---Steep Optima Curve
+def bivar_gaussian(w1, w2, x_mean=0.0, y_mean=0.0, x_sig=1.0, y_sig=1.0):
+    norm = 1 / (2 * np.pi * x_sig * y_sig)
+    x_exp = (-1 * (w1 - x_mean) ** 2) / (2 * x_sig ** 2)
+    y_exp = (-1 * (w2 - y_mean) ** 2) / (2 * y_sig ** 2)
+    return norm * torch.exp(x_exp + y_exp)
+
+
+def comb_func(w1, w2):
+    z = -bivar_gaussian(w1, w2, x_mean=1.0, y_mean=-0.5, x_sig=0.2, y_sig=0.2)
+    z -= bivar_gaussian(w1, w2, x_mean=-1.0, y_mean=0.5, x_sig=0.2, y_sig=0.2)
+    z -= bivar_gaussian(w1, w2, x_mean=-0.5, y_mean=-0.8, x_sig=0.2, y_sig=0.2)
+    return z
+
+
+def plot_curve(curve_fn, x_range=(-5, 5), y_range=(-5, 5), plot_3d=True, title="Pathological curvature"):
+    # Initialize a Plotly figure
+    figure = go.Figure()
+    # Generate x and y tensors
+
+    x_tensor = torch.arange(x_range[0], x_range[1], (x_range[1] - x_range[0]) / 100)
+    y_tensor = torch.arange(y_range[0], y_range[1], (y_range[1] - y_range[0]) / 100)
+    # Create a meshgrid for 3D plot
+    grid_x, grid_y = torch.meshgrid(x_tensor, y_tensor, indexing='xy')
+    # Create the call to the function curve (could be pathological or steep curve)
+    z_tensor = curve_fn(grid_x, grid_y)
+    x_array, y_array, z_array = grid_x.numpy(), grid_y.numpy(), z_tensor.numpy()
+
+    if plot_3d:
+        figure.add_trace(go.Surface(z=z_array, x=x_array, y=y_array))
+    else:
+        figure.add_trace(go.Contour(z=z_array, x=x_tensor.numpy(), y=y_tensor.numpy()))
+    figure.update_layout(title=f"{title}",
+                         xaxis=dict(title=f"$w_1$"),
+                         yaxis=dict(title=f"$w_2$")
+                         )
+    figure.show()
+    return figure
+
+
+# ------------------------------------------Visualize each training algorithm----------------------------------------- #
+
+
+def train_curve(optimizer_function, loss_curve=pathological_curve_loss, num_updates=100, init=[5, 5]):
+    """
+    :param optimizer_function: Constructor of the optimizer function to be used. The optimizer Template needs on parameters
+    :param loss_curve: Loss function (by default tanh*sigmoid pathological curve)
+    :param num_updates: Number of updates (steps) optimizer going to take to update the parameters
+    :param init: Initial values of the parameters
+    :return:
+    result_array: Numpy array of shape [number of updates, 3], where [t,:2] represents parameters while
+    [t,2] represents value of the loss function at t^th update
+    """
+    weights = nn.Parameter(torch.FloatTensor(init), requires_grad=True)
+    optimizer = optimizer_function([weights])
+    result_array = []
+
+    for t in range(num_updates):
+        # -- zero-out the gradient value
+        optimizer.zero_grad()
+        loss_value = loss_curve(weights[0], weights[1])
+        # print(f"Before---, {[weights[0].data.detach(), weights[1].detach(), loss_value.item()]}")
+
+        # -- Backpropagation
+        loss_value.backward()
+        # -- Update the parameters
+        optimizer.step()
+
+        result_array.append(torch.cat([weights.data.detach(), loss_value.unsqueeze(dim=0).detach()], dim=0))
+
+    return torch.stack(result_array, dim=0).numpy()
+
+
+def plot_optimization_curves(loss_curve, sgd_lr=0.01, sgd_mom_lr=0.001, sgd_momentum=0.9, adam_lr=1e-3, init=[5, 5],
+                             plot_title='Pathological Loss curve'):
+    SGD_points = train_curve(lambda params: SGD(params, lr=sgd_lr), loss_curve=loss_curve, init=init)
+    SGDMomentum_points = train_curve(lambda params: SGDMomentum(params, lr=sgd_mom_lr, momentum=sgd_momentum),
+                                     loss_curve=loss_curve, init=init)
+    Adam_points = train_curve(lambda params: Adam(params, lr=adam_lr),loss_curve=loss_curve, init=init)
+
+    all_points = np.concatenate([SGD_points, SGDMomentum_points, Adam_points], axis=0)
+    # For Steep optima curve when we use [0, 0] initialization the
+    if loss_curve.__name__ == 'comb_func':
+        fig = plot_curve(loss_curve,
+                         x_range=(-2, 2), y_range=(-2, 2),
+                         plot_3d=False, title=plot_title)
+
+    else:
+        fig = plot_curve(loss_curve,
+                         x_range=(-np.absolute(all_points[:, 0]).max(), np.absolute(all_points[:, 0]).max()),
+                         y_range=(-np.absolute(all_points[:, 1]).max(), np.absolute(all_points[:, 1]).max()),
+                         plot_3d=False,
+                         title=plot_title)
+
+
+    fig.add_trace(
+        go.Scatter(x=SGD_points[:, 0], y=SGD_points[:, 1], mode='lines+markers', marker_color='red', name='SGD'))
+    fig.add_trace(
+        go.Scatter(x=SGDMomentum_points[:, 0], y=SGDMomentum_points[:, 1], mode='lines+markers', marker_color='blue',
+                   name='SGD_momentum'))
+    fig.add_trace(
+        go.Scatter(x=Adam_points[:, 0], y=Adam_points[:, 1], mode='lines+markers', marker_color='grey', name='Adam'))
+    fig.update_layout(showlegend=False)
+    fig.show()
+
+
+plot_optimization_curves(pathological_curve_loss, sgd_lr=10, sgd_mom_lr=10, sgd_momentum=0.9, adam_lr=1,
+                         plot_title='Pathological Loss curve')
+plot_optimization_curves(comb_func, sgd_lr=0.5, sgd_mom_lr=1, sgd_momentum=0.9, adam_lr=0.2, init=[0, 0],
+                         plot_title='Steep Optima')
+
+# ------------------------------------------Visualize effective learning Rate----------------------------------------- #
